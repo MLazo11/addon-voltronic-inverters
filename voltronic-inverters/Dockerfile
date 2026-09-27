@@ -44,6 +44,12 @@ RUN chmod a+x /run.sh
 
 RUN sed -i '1i#include <string>' /opt/inverter-cli/inverter.h
 
+# Fix: avoid segfault when the inverter reply is truncated/incomplete before the
+# 5s read timeout (endbuf stays NULL and pointer arithmetic on it corrupts buf[] index).
+# Also force explicit raw serial mode instead of relying on inherited termios state.
+RUN sed -i 's#settings\.c_oflag &= ~OPOST;#settings.c_oflag \&= ~OPOST; settings.c_lflag \&= ~(ICANON | ECHO | ECHOE | ISIG); settings.c_iflag \&= ~(ICRNL | INLCR | IGNCR | IXON | IXOFF);#' /opt/inverter-cli/inverter.cpp
+RUN sed -i 's#int replysize = endbuf - startbuf + 1;#if (endbuf == NULL) { lprintf("DEBUG:  %s: incomplete reply, no CR terminator before timeout (%d bytes received)", cmd, i); return false; } int replysize = endbuf - startbuf + 1;#' /opt/inverter-cli/inverter.cpp
+
 # Build the inverter CLI
 RUN cd /opt/inverter-cli && \
     mkdir bin && \
