@@ -8,6 +8,7 @@ RUN apt-get update && apt-get install -y \
         cmake \
         jq \
         mosquitto-clients \
+        patch \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -24,6 +25,12 @@ RUN git clone --filter=blob:none --no-checkout https://github.com/catalinbordan/
     git checkout $GIT_COMMIT && \
     git sparse-checkout init --cone && \
     git sparse-checkout set sources config
+
+# Add support for the QPIGS2 command (PV2 voltage/current/power on dual-MPPT
+# inverters, e.g. Axpert II 11K). Best-effort: if the inverter doesn't answer
+# QPIGS2, the fields simply report 0 and nothing else is affected.
+COPY patches/pv2-support.patch /tmp/pv2-support.patch
+RUN cd repo && patch -p1 < /tmp/pv2-support.patch
 
 # Create the destination directory and copy necessary files
 RUN mkdir -p /etc/inverter && \
