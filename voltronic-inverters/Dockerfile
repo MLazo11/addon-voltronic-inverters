@@ -30,10 +30,15 @@ RUN mkdir -p /etc/inverter && \
     cp -r repo/sources/* /opt/ && \
     cp -r repo/config/* /etc/inverter/
 
-# Remove the cloned repository to reduce image size
+# Fix: serialize access to the serial port so mqtt-push.sh and mqtt-subscriber.sh
+# don't call inverter_poller at the same time (race condition, issue #5:
+# https://github.com/GitGab19/addon-voltronic-inverters/issues/5)
+RUN sed -i 's#timeout 10 /opt/inverter-cli/bin/inverter_poller -1#flock -w 15 /tmp/inverter_poller.lock timeout 10 /opt/inverter-cli/bin/inverter_poller -1#' /opt/inverter-mqtt/mqtt-push.sh
+RUN sed -i 's#/opt/inverter-cli/bin/inverter_poller -r $rawcmd#flock -w 15 /tmp/inverter_poller.lock /opt/inverter-cli/bin/inverter_poller -r $rawcmd#' /opt/inverter-mqtt/mqtt-subscriber.sh
 RUN rm -rf repo
 
-# Copy the run.sh script from the build context to the container
+# Remove the cloned repository to reduce image size
+
 COPY run.sh /run.sh
 RUN chmod a+x /run.sh
 
