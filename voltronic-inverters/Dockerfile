@@ -49,6 +49,11 @@ RUN sed -i '1i#include <string>' /opt/inverter-cli/inverter.h
 # Also force explicit raw serial mode instead of relying on inherited termios state.
 RUN sed -i 's#settings\.c_oflag &= ~OPOST;#settings.c_oflag \&= ~OPOST; settings.c_lflag \&= ~(ICANON | ECHO | ECHOE | ISIG); settings.c_iflag \&= ~(ICRNL | INLCR | IGNCR | IXON | IXOFF);#' /opt/inverter-cli/inverter.cpp
 RUN sed -i 's#int replysize = endbuf - startbuf + 1;#if (endbuf == NULL) { lprintf("DEBUG:  %s: incomplete reply, no CR terminator before timeout (%d bytes received)", cmd, i); return false; } int replysize = endbuf - startbuf + 1;#' /opt/inverter-cli/inverter.cpp
+# Fix: reduce the read-loop poll interval from 50ms to 10ms. Diagnostics showed the
+# original 50ms interval exceeds the time to overflow the ~16 byte serial receive
+# buffer at 2400 baud, silently dropping data on long replies (QPIGS/QPIRI) even
+# though the inverter transmits the full frame.
+RUN sed -i 's#usleep(50000);  // sleep 50ms#usleep(10000);  // sleep 10ms (reduced from 50ms, see diagnostic notes)#' /opt/inverter-cli/inverter.cpp
 
 # Build the inverter CLI
 RUN cd /opt/inverter-cli && \
