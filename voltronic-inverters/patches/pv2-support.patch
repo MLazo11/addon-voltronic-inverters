@@ -1,0 +1,161 @@
+diff --git a/sources/inverter-cli/inverter.cpp b/sources/inverter-cli/inverter.cpp
+index a1e32df..3fc2a7a 100644
+--- a/sources/inverter-cli/inverter.cpp
++++ b/sources/inverter-cli/inverter.cpp
+@@ -13,6 +13,7 @@ cInverter::cInverter(std::string devicename) {
+   device = devicename;
+   status1[0] = 0;
+   status2[0] = 0;
++  status3[0] = 0;
+   warnings[0] = 0;
+   mode = 0;
+ }
+@@ -31,6 +32,13 @@ string *cInverter::GetQpiriStatus() {
+   return result;
+ }
+ 
++string *cInverter::GetQpigs2Status() {
++  m.lock();
++  string *result = new string(status3);
++  m.unlock();
++  return result;
++}
++
+ string *cInverter::GetWarnings() {
+   m.lock();
+   string *result = new string(warnings);
+@@ -219,6 +227,20 @@ void cInverter::poll() {
+       }
+     }
+ 
++    // Reading QPIGS2 status (PV2 data - only present on dual-MPPT models).
++    // Best-effort: a NAK or unsupported command must never block the main
++    // poll loop, so we mark this "changed" after the first attempt
++    // regardless of outcome, and simply leave status3 empty if unsupported.
++    if (!ups_qpigs2_changed) {
++      if (query("QPIGS2") &&
++    strcmp((char *)&buf[1], "NAK") != 0) {
++        m.lock();
++        strcpy(status3, (const char*)buf+1);
++        m.unlock();
++      }
++      ups_qpigs2_changed = true;
++    }
++
+     // Reading QPIRI status
+     if (!ups_qpiri_changed) {
+       if (query("QPIRI") &&
+diff --git a/sources/inverter-cli/inverter.h b/sources/inverter-cli/inverter.h
+index e83621d..3ff3899 100644
+--- a/sources/inverter-cli/inverter.h
++++ b/sources/inverter-cli/inverter.h
+@@ -12,6 +12,7 @@ class cInverter {
+   char warnings[1024];
+   char status1[1024];
+   char status2[1024];
++  char status3[1024]; // QPIGS2 (PV2 data on dual-MPPT models)
+   char mode;
+   std::string device;
+   std::mutex m;
+@@ -38,6 +39,7 @@ public:
+ 
+   string *GetQpiriStatus();
+   string *GetQpigsStatus();
++  string *GetQpigs2Status();
+   string *GetWarnings();
+ 
+   int GetMode();
+diff --git a/sources/inverter-cli/main.cpp b/sources/inverter-cli/main.cpp
+index 89864eb..a7d75de 100644
+--- a/sources/inverter-cli/main.cpp
++++ b/sources/inverter-cli/main.cpp
+@@ -32,6 +32,7 @@ atomic_bool ups_status_changed(false);
+ atomic_bool ups_qmod_changed(false);
+ atomic_bool ups_qpiri_changed(false);
+ atomic_bool ups_qpigs_changed(false);
++atomic_bool ups_qpigs2_changed(false);
+ atomic_bool ups_qpiws_changed(false);
+ atomic_bool ups_cmd_executed(false);
+ 
+@@ -123,6 +124,11 @@ int eeprom_version;
+ int pv_charging_power;
+ char device_status2[3];
+ 
++// Reply3 (QPIGS2 - PV2 data, only present on dual-MPPT models; defaults to 0 when unsupported)
++float pv2_input_current = 0;
++float pv2_input_voltage = 0;
++int pv2_charging_power = 0;
++
+ // Reply2
+ float grid_voltage_rating;
+ float grid_current_rating;
+@@ -209,6 +215,7 @@ float batt_redischarge_voltage;
+             int mode = ups->GetMode();
+             string *reply1   = ups->GetQpigsStatus();
+             string *reply2   = ups->GetQpiriStatus();
++            string *reply3   = ups->GetQpigs2Status(); // QPIGS2 (PV2) - may be empty if inverter doesn't support it
+             string *warnings = ups->GetWarnings();
+ 
+             if (reply1 && reply2 && warnings) {
+@@ -265,6 +272,18 @@ float batt_redischarge_voltage;
+                                                   // ^ PV OK condition for parallel
+                                                   // ^ PV power balance
+ 
++                // Parse QPIGS2 (PV2) if the inverter answered it - dual-MPPT models only.
++                // Reply format: "<PV2 input current> <PV2 input voltage> <PV2 charging power>"
++                pv2_input_current = 0;
++                pv2_input_voltage = 0;
++                pv2_charging_power = 0;
++                if (reply3 && !reply3->empty()) {
++                    sscanf(reply3->c_str(), "%f %f %d",
++                           &pv2_input_current,   // * PV2 Input current for battery
++                           &pv2_input_voltage,   // * PV2 Input voltage
++                           &pv2_charging_power); // * PV2 charging power
++                }
++
+                 // There appears to be a discrepancy in actual DMM measured current vs what the meter is
+                 // telling me it's getting, so lets add a variable we can multiply/divide by to adjust if
+                 // needed.  This should be set in the config so it can be changed without program recompile.
+@@ -313,6 +332,9 @@ float batt_redischarge_voltage;
+                 printf("  \"Battery_voltage_offset_for_fans_on\":%d,\n", battery_voltage_offset_for_fans_on); // QPIGS
+                 printf("  \"Eeprom_version\":%d,\n", eeprom_version); // QPIGS
+                 printf("  \"PV_charging_power\":%d,\n", pv_charging_power); // QPIGS
++                printf("  \"PV2_in_voltage\":%.1f,\n", pv2_input_voltage);   // QPIGS2 (0 if unsupported)
++                printf("  \"PV2_in_current\":%.1f,\n", pv2_input_current);   // QPIGS2 (0 if unsupported)
++                printf("  \"PV2_charging_power\":%d,\n", pv2_charging_power);// QPIGS2 (0 if unsupported)
+                 printf("  \"Charging_to_floating_mode\":%c,\n", device_status2[0]);   // QPIGS
+                 printf("  \"Switch_On\":%c,\n", device_status2[1]);    // QPIGS
+                 printf("  \"Dustproof_installed\":%c,\n", device_status2[2]);     // QPIGS
+@@ -331,6 +353,7 @@ float batt_redischarge_voltage;
+                 // Delete reply string so we can update with new data when polled again...
+                 delete reply1;
+                 delete reply2;
++                delete reply3;
+ 
+                 if(runOnce) {
+                     // there is no thread -- ups->terminateThread();
+diff --git a/sources/inverter-cli/main.h b/sources/inverter-cli/main.h
+index 61e2a2a..97b489b 100644
+--- a/sources/inverter-cli/main.h
++++ b/sources/inverter-cli/main.h
+@@ -12,5 +12,6 @@ extern atomic_bool ups_qpiws_changed;
+ extern atomic_bool ups_qmod_changed;
+ extern atomic_bool ups_qpiri_changed;
+ extern atomic_bool ups_qpigs_changed;
++extern atomic_bool ups_qpigs2_changed;
+ 
+ #endif // ___MAIN_H
+diff --git a/sources/inverter-mqtt/mqtt-init.sh b/sources/inverter-mqtt/mqtt-init.sh
+index 9a0c8bf..13256bb 100755
+--- a/sources/inverter-mqtt/mqtt-init.sh
++++ b/sources/inverter-mqtt/mqtt-init.sh
+@@ -135,6 +135,9 @@ registerTopic "PV_in_voltage" "V" "solar-panel-large" "voltage" "PV in voltage"
+ # registerEnergyTopic "PV_in_watthour" "kWh" "solar-panel-large" "energy" "PV in kWatthour"
+registerTopic "PV_in_watts" "W" "solar-panel-large" "power" "PV in watts"
+registerTopic "PV_charging_power" "W" "solar-panel-large" "power" "PV charging power"
++registerTopic "PV2_in_current" "A" "solar-panel-large" "current" "PV2 in current"
++registerTopic "PV2_in_voltage" "V" "solar-panel-large" "voltage" "PV2 in voltage"
++registerTopic "PV2_charging_power" "W" "solar-panel-large" "power" "PV2 charging power"
+registerModeTopic "SCC_charge_on" "" "power" "None" "SCC charge on"
+registerTopic "SCC_voltage" "V" "current-dc" "voltage" "SCC voltage"
+registerModeTopic "Switch_On" "" "power" "None" "Switch On"
