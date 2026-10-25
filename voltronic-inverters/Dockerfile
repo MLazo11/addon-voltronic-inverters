@@ -44,6 +44,8 @@ RUN sed -i 's#timeout 10 /opt/inverter-cli/bin/inverter_poller -1#flock -w 15 /t
 RUN sed -i 's#/opt/inverter-cli/bin/inverter_poller -r $rawcmd#flock -w 15 /tmp/inverter_poller.lock /opt/inverter-cli/bin/inverter_poller -r $rawcmd#' /opt/inverter-mqtt/mqtt-subscriber.sh
 RUN sed -i 's/sleep 7; done/sleep 1; done/' /opt/inverter-mqtt/entrypoint.sh
 RUN rm -rf repo
+COPY bms-poll.sh /opt/inverter-mqtt/bms-poll.sh
+RUN chmod a+x /opt/inverter-mqtt/bms-poll.sh
 
 # Remove the cloned repository to reduce image size
 
