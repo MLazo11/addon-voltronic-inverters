@@ -65,7 +65,7 @@ echo "[DEBUG] Updated content of mqtt.json:"
 cat "$MQTT_CONFIG"
 echo "[DEBUG] QBMS one-shot read-only test"
 timeout 20 /opt/inverter-cli/bin/inverter_poller -r QBMS 2>&1 || echo "[DEBUG] QBMS test failed"
-
+/opt/inverter-mqtt/bms-poll.sh &
 bashio::log.info "Configuration completed successfully."
 
 exec /opt/inverter-mqtt/entrypoint.sh
